@@ -1,0 +1,754 @@
+USE [BarCodeNew]
+GO
+/****** Object:  StoredProcedure [dbo].[kanban4qisdetail]    Script Date: 2024/5/9 12:00:16 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER proc [dbo].[kanban4qisdetail]
+(
+	@valueType nvarchar(50),
+	@value nvarchar(max),
+	@startTime nvarchar(50),
+	@endTime nvarchar(50),
+	@reportType nvarchar(50),
+	@operation nvarchar(50),
+	@checkTime nvarchar(50)
+)
+as
+if(@valueType='按工站查询')
+begin
+	if(@reportType='汇总报表')
+	begin
+		 select distinct  aa.*,bb.Repairname from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,c.illDate,c.repairResult,c.repairDate,c.repairRemark
+		from Ass_serialcheck(nolock) a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d 
+		where a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		 and b.description=@operation
+		 and result is null
+		 and d.deptid='Assembly'
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		  order by serialNo
+	end
+	else if(@reportType='趋势图(日报)')
+	begin
+		select allinfo.tetime as stime,@value as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		round((allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end,2) as srate from
+		(
+		select tetime,COUNT(serialNo) as allqty from (
+		select  a.serialNo,a.operation,convert(nvarchar(10),min(a.OperDate),120) as tetime 
+		from Ass_serialcheck (nolock)a,operation(nolock) b where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and b.description=@value group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) allinfo left join
+		 (
+		select tetime,COUNT(serialNo) as qty from (
+		select  a.serialNo,a.operation,convert(nvarchar(10),min(a.OperDate),120) as tetime 
+		from Ass_serialcheck (nolock)a,operation (nolock)b where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and b.description=@value and result is null group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) info
+		 on allinfo.tetime=info.tetime
+
+	end
+	else if(@reportType='趋势图(周报)')
+	begin
+		select allinfo.tetime as stime,@value as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		round((allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end,2) as srate from
+		(
+		select tetime,COUNT(serialNo) as allqty from (
+		select  a.serialNo,a.operation,convert(nvarchar(4),min(a.OperDate),120)+'/'+
+		cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime 
+		from Ass_serialcheck (nolock)a,operation (nolock)b 
+		where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and b.description=@value group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) allinfo left join
+		 (
+		select tetime,COUNT(serialNo) as qty from (
+		select  a.serialNo,a.operation,convert(nvarchar(4),min(a.OperDate),120)+'/'+
+		cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime 
+		from Ass_serialcheck (nolock)a,operation (nolock)b 
+		where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59'
+		 and b.description=@value and result is null group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) info
+		 on allinfo.tetime=info.tetime
+	end
+	else if(@reportType='趋势图(月报)')
+	begin
+		select allinfo.tetime as stime,@value as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		round((allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end,2) as srate from
+		(
+		select tetime,COUNT(serialNo) as allqty from (
+		select  a.serialNo,a.operation,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		from Ass_serialcheck (nolock)a,operation (nolock)b where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and b.description=@value group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) allinfo left join
+		 (
+		select tetime,COUNT(serialNo) as qty from (
+		select  a.serialNo,a.operation,convert(nvarchar(7),min(a.OperDate),120) as tetime 
+		from Ass_serialcheck (nolock)a,operation(nolock) b where a.operation=b.operation and
+		 a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and b.description=@value and result is null group by a.serialNo,a.operation) a 
+		 group by tetime
+		 ) info
+		 on allinfo.tetime=info.tetime
+	end
+end
+
+else if(@valueType='按工单查询')
+begin
+		select distinct  aa.*,bb.Repairname from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,c.illDate,c.repairResult,c.repairDate,c.repairRemark
+		from Ass_serialcheck (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d 
+		where a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode 
+		 and b.description=@operation
+		 and result is null
+		 and d.deptid='Assembly'
+		 and a.workNo=@value
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		  order by serialNo
+end
+
+else if(@valueType='按机型查询')
+begin
+	if(@reportType='汇总报表')
+	begin
+	 
+	    if(@operation<>'总直通率')
+
+	    select tt.*,tblmax.HostName,r.mName repair1,r2.mName repair2,r3.mName repair3
+		from(
+		 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+		 aa.repairRemark,bb.Repairname,aa.prodes,repairResult1,repairResult2,repairResult3,productType  from
+		  (
+			select distinct c.workNo,a.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+			c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes,repairResult1,repairResult2,repairResult3,productType
+			from Ass_serialcheck (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d,Assembly_Prod (nolock)e,model (nolock)f 
+			where 
+			a.workNo=e.workno
+			and e.productcode=f.productCode 
+			and a.operation=b.operation 
+			and a.serialNo=c.serialNo
+			and a.operation=c.type
+			and c.illReason=d.defectcode
+			and a.OperDate >= @startTime+' 00:00:00' 
+			 and a.OperDate <= @endTime+' 23:59:59' 
+			 and b.description=case @operation when '总直通率' then b.description else @operation end
+			 and f.modelNo=case @value when '总直通率' then f.modelNo else @value end
+			 and result is null
+			 and d.deptid='Assembly'  and b.type='check'
+		
+			 union all
+			 select distinct c.workNo,a.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+			c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes,repairResult1,repairResult2,repairResult3,productType
+			from Ass_serialcheck20230919 (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d,Assembly_Prod (nolock)e,model (nolock)f 
+			where 
+			a.workNo=e.workno
+			and e.productcode=f.productCode 
+			and a.operation=b.operation 
+			and a.serialNo=c.serialNo
+			and a.operation=c.type
+			and c.illReason=d.defectcode
+			and a.OperDate >= @startTime+' 00:00:00' 
+			 and a.OperDate <= @endTime+' 23:59:59' 
+			 and b.description=case @operation when '总直通率' then b.description else @operation end
+			 and f.modelNo=case @value when '总直通率' then f.modelNo else @value end
+			 and result is null
+	
+			 and d.deptid='Assembly'  and b.type='check'
+		   ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		 union
+		  
+		   select distinct a.workNo,a.serialNo,case when CHARINDEX(';',illReason)>0 then
+		   substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' 
+		   else illReason end as illReason,
+		   d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+			'' as repairResult,'' as repairDate,'' repairRemark,'' Repairname,
+			e.prodes,'' repairResult1,'' repairResult2,'' repairResult3,productType
+			from Ass_serialcheck (nolock)a,operation (nolock)b,SAP_AutoTesttemp (nolock)c,
+			DefectCode (nolock)d,Assembly_Prod (nolock)e,model(nolock) f 
+			where 
+			a.workNo=e.workno
+			and e.productcode=f.productCode 
+			and a.operation=b.operation 
+			and a.serialNo=c.serialNo
+			and a.operation=c.operation
+			and (case when CHARINDEX(';',illReason)>0 then  substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' else illReason end)=d.defectcode
+			and a.OperDate >= @startTime+' 00:00:00' 
+			 and a.OperDate <= @endTime+' 23:59:59' 
+			and b.description=case @operation when '总直通率' then b.description else @operation end
+			 and f.modelNo=case @value when '总直通率' then f.modelNo else @value end
+			 and result is null
+			 
+			 and d.deptid='Assembly'  and b.type='check'
+
+			 union
+
+			 select distinct a.workNo,a.serialNo,case when CHARINDEX(';',illReason)>0 then
+		   substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' 
+		   else illReason end as illReason,
+		   d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+			'' as repairResult,'' as repairDate,'' repairRemark,'' Repairname,
+			e.prodes,'' repairResult1,'' repairResult2,'' repairResult3,productType
+			from Ass_serialcheck20230919 (nolock)a,operation (nolock)b,SAP_AutoTesttemp (nolock)c,
+			DefectCode (nolock)d,Assembly_Prod (nolock)e,model(nolock) f 
+			where 
+			a.workNo=e.workno
+			and e.productcode=f.productCode 
+			and a.operation=b.operation 
+			and a.serialNo=c.serialNo
+			and a.operation=c.operation
+			and (case when CHARINDEX(';',illReason)>0 then  substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' else illReason end)=d.defectcode
+			and a.OperDate >= @startTime+' 00:00:00' 
+			 and a.OperDate <= @endTime+' 23:59:59' 
+			and b.description=case @operation when '总直通率' then b.description else @operation end
+			 and f.modelNo=case @value when '总直通率' then f.modelNo else @value end
+			 and result is null
+			 and d.deptid='Assembly'  and b.type='check'
+		 
+			  union
+
+			 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+		    aa.repairRemark,bb.Repairname,aa.prodes,repairResult1,repairResult2,repairResult3,productType from
+		  (
+			select distinct c.workNo,a.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+			c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes,repairResult1,repairResult2,repairResult3,productType 
+			from SMT_serialcheck (nolock)a,operation (nolock)b,SMT_Repair (nolock)c,DefectCode (nolock)d,SMT_Prod (nolock)e,model (nolock)f 
+			where 
+			a.workNo=e.workno
+			and e.productcode=f.productCode 
+			and a.operation=b.operation 
+			and a.serialNo=c.serialNo
+			and a.operation=c.type
+			and c.illReason=d.defectcode
+			and a.OperDate >= @startTime+' 00:00:00' 
+			 and a.OperDate <= @endTime+' 23:59:59' 
+			 and b.description=case @operation when '总直通率' then b.description else @operation end
+			-- and f.modelNo=case @value when '总直通率' then f.modelNo else @value end
+			 and result is null
+			 and d.deptid='SMT'  and b.type='check'
+ 
+		   ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='SMT'
+			 )tt 
+			 
+			 left join (select tbl.RadioID,HostName from GTestData.dbo.tblRadioResult tbl inner join 
+					   (select RadioID,max(ProdDate) ProdDate  from GTestData.dbo.tblRadioResult(nolock) where (Result='Fail' or Result='ERR') group by RadioID
+					   ) tblm 
+						on tbl.RadioID=tblm.RadioID and tbl.ProdDate=tblm.ProdDate
+					)tblmax
+			  on tt.serialNo=tblmax.RadioID
+
+		  left join RepairInfo r on tt.repairResult1=r.mID 
+          left join RepairInfo r2 on tt.repairResult2=r2.mID 
+          left join RepairInfo r3 on tt.repairResult3=r3.mID--serialNo
+	   
+	   --20140904新增加的
+	   else
+	    begin
+	     --20140904新增加的
+	     declare @modelno varchar(50)
+	     declare @tb table
+	     (
+	       tbmodelno varchar(20)
+	     )
+	     while(CHARINDEX(',',@value)>0)
+		  begin
+		   set @modelno=SUBSTRING(@value,0,CHARINDEX(',',@value))
+		   set @value=REPLACE(@value,SUBSTRING(@value,0,CHARINDEX(',',@value))+',','')
+		   insert into @tb
+		   select @modelno
+		  end
+	      --20140904新增加的 
+	     
+	     select tt.*,tblmax.HostName,r.mName repair1,r2.mName repair2,r3.mName repair3 
+		 from(
+		 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+		 aa.repairRemark,bb.Repairname,aa.prodes,aa.repairResult1,aa.repairResult2,
+		 aa.repairResult3 from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+		c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes,repairResult1,repairResult2,repairResult3
+		from Ass_serialcheck (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d,Assembly_Prod (nolock)e,model (nolock)f 
+		where 
+		a.workNo=e.workno
+		and e.productcode=f.productCode 
+		and a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		 and b.description=case @operation when '总直通率' then b.description else @operation end
+		 and f.modelNo in (select * from @tb)
+		 and result is null
+		 and d.deptid='Assembly'
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		 union
+		  
+		  select distinct a.workNo,a.serialNo,case when CHARINDEX(';',illReason)>0 then  substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' else illReason end as illReason,
+		  d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+		'' as repairResult,'' as repairDate,'' repairRemark,'' Repairname,e.prodes,'' repairResult1,'' repairResult2,'' repairResult3
+		from Ass_serialcheck (nolock)a,operation (nolock)b,SAP_AutoTesttemp (nolock)c,DefectCode (nolock)d,Assembly_Prod (nolock)e,model (nolock)f 
+		where 
+		a.workNo=e.workno
+		and e.productcode=f.productCode 
+		and a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.operation
+		and (case when CHARINDEX(';',illReason)>0 then  substring(illReason,0,CHARINDEX(';',illReason)) when illReason='' then '9999' else illReason end)=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		and b.description=case @operation when '总直通率' then b.description else @operation end
+		and f.modelNo in (select * from @tb)
+		 and result is null
+		 and d.deptid='Assembly'
+
+		 union
+
+		   select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+		 aa.repairRemark,bb.Repairname,aa.prodes,aa.repairResult1,aa.repairResult2,
+		 aa.repairResult3 from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+		c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes,repairResult1,repairResult2,repairResult3
+		from SMT_serialcheck (nolock)a,operation (nolock)b,SMT_Repair (nolock)c,DefectCode (nolock)d,SMT_Prod (nolock)e,model (nolock)f 
+		where 
+		a.workNo=e.workno
+		and e.productcode=f.productCode 
+		and a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		 and b.description=case @operation when '总直通率' then b.description else @operation end
+		 and f.modelNo in (select * from @tb)
+		 and result is null
+		 and d.deptid='SMT'
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		 
+		 )tt left join (select tbl.RadioID,HostName from GTestData.dbo.tblRadioResult tbl inner join 
+                   (select RadioID,max(ProdDate) ProdDate  
+				   from GTestData.dbo.tblRadioResult (nolock)where (Result='Fail' or Result='ERR') group by RadioID
+                   ) tblm 
+                    on tbl.RadioID=tblm.RadioID and tbl.ProdDate=tblm.ProdDate
+                )tblmax
+          on tt.serialNo=tblmax.RadioID
+
+		  left join RepairInfo r on tt.repairResult1=r.mID 
+          left join RepairInfo r2 on tt.repairResult2=r2.mID 
+          left join RepairInfo r3 on tt.repairResult3=r3.mID
+
+		  order by illDate--serialNo
+		  
+	   end
+	end
+	else if(@reportType='趋势图(日报)')
+	begin
+		select a.LINE_GROUP,a.PROD_ITEM,a.DEFECT_CODE,a.DEFECT_DESC,convert(varchar(20),REPORT_TIME,120) REPORT_TIME
+		from MES_SIMPLE_CHECK_RECORD a(nolock),model b (nolock)
+		where a.PROD_ITEM=b.productCode 
+		and a.REPORT_TIME>=@startTime+' 00:00:00' and a.REPORT_TIME<=@endTime+' 23:59:59'
+		 and b.modelNo=@value
+		and a.WK_STATION=@operation
+	end
+	else if(@reportType='重测率')
+	begin
+	    if(@operation<>'总直通率(刨除重测)')
+	      select tt.*,tblmax.HostName,r.mName repair1,r2.mName repair2,r3.mName repair3 from(
+			select distinct c.workNo,a.serialNo,a.illReason,e.defectname,convert(varchar(20),a.illDate,120) as illDate,
+			a.repairResult,convert(varchar(20),a.repairDate,120) as repairDate,a.repairRemark,'' Repairname,c.prodes,repairResult1,repairResult2,repairResult3
+			from Ass_Repair a with (nolock),operation b with (nolock),Assembly_Prod c with (nolock),model d with (nolock)
+			,DefectCode e
+			where  a.workNo=c.workno and c.productcode=d.productCode and a.type=b.operation
+			and a.illReason=e.defectcode
+			and a.repairRemark='制程重测' 
+			and b.deptid='Assembly' and b.type='check' 
+			and  a.illDate  >= @startTime+' 00:00:00' 
+			and a.illDate <= @endTime+' 23:59:59' 
+			and b.description=@operation
+			and d.modelNo=@value
+			) tt left join (select tbl.RadioID,HostName from GTestData.dbo.tblRadioResult tbl inner join 
+                   (select RadioID,max(ProdDate) ProdDate  from GTestData.dbo.tblRadioResult where (Result='Fail' or Result='ERR') group by RadioID
+                   ) tblm 
+                    on tbl.RadioID=tblm.RadioID and tbl.ProdDate=tblm.ProdDate
+                )tblmax
+          on tt.serialNo=tblmax.RadioID
+
+		  left join RepairInfo r on tt.repairResult1=r.mID 
+          left join RepairInfo r2 on tt.repairResult2=r2.mID 
+          left join RepairInfo r3 on tt.repairResult3=r3.mID
+
+		  order by serialNo
+		  
+	   else
+	       begin
+	        --20140911新增加的
+			 declare @modelnotest varchar(50)
+			 declare @tbtest table
+			 (
+			   tbmodelno varchar(20)
+			 )
+			 while(CHARINDEX(',',@value)>0)
+			  begin
+			   set @modelnotest=SUBSTRING(@value,0,CHARINDEX(',',@value))
+			   set @value=REPLACE(@value,SUBSTRING(@value,0,CHARINDEX(',',@value))+',','')
+			   insert into @tbtest
+			   select @modelnotest
+			  end
+	      --20140911新增加的 
+	       select tt.*,tblmax.HostName,r.mName repair1,r2.mName repair2,r3.mName repair3 from(
+	       select distinct c.workNo,a.serialNo,a.illReason,e.defectname,convert(varchar(20),a.illDate,120) as illDate,
+			a.repairResult,convert(varchar(20),a.repairDate,120) as repairDate,a.repairRemark,'' Repairname,c.prodes,repairResult1,repairResult2,repairResult3
+			from Ass_Repair a with (nolock),operation b with (nolock),Assembly_Prod c with (nolock),model d with (nolock)
+			,DefectCode e
+			where  a.workNo=c.workno and c.productcode=d.productCode and a.type=b.operation
+			and a.illReason=e.defectcode
+			and a.repairRemark='制程重测' 
+			and b.deptid='Assembly' and b.type='check' 
+			and  a.illDate  >= @startTime+' 00:00:00' 
+			and a.illDate <= @endTime+' 23:59:59' 
+			--and b.description=@operation
+			and b.description=case @operation when '总直通率(刨除重测)' then b.description else @operation end
+		    and d.modelNo in(select * from @tbtest)
+		    ) tt left join (select tbl.RadioID,HostName from GTestData.dbo.tblRadioResult tbl inner join 
+                   (select RadioID,max(ProdDate) ProdDate  from GTestData.dbo.tblRadioResult where (Result='Fail' or Result='ERR') group by RadioID
+                   ) tblm 
+                    on tbl.RadioID=tblm.RadioID and tbl.ProdDate=tblm.ProdDate
+                )tblmax
+          on tt.serialNo=tblmax.RadioID
+
+		  left join RepairInfo r on tt.repairResult1=r.mID 
+          left join RepairInfo r2 on tt.repairResult2=r2.mID 
+          left join RepairInfo r3 on tt.repairResult3=r3.mID
+
+		  order by serialNo
+		  end
+	end
+	else if(@reportType='趋势图(月报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c,model (nolock)d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.modelNo=@value and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c,model (nolock)d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		  and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.modelNo=@value and result is null and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+end
+
+else if(@valueType='按拉别查询')
+begin
+	if(@reportType='汇总报表')
+	begin
+		select distinct aa.*,bb.Repairname from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,c.illDate,c.repairResult,c.repairDate,c.repairRemark
+		from Ass_serialcheck (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d,Assembly_Prod e 
+		where 
+		a.workNo=e.workno
+		and a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		 and b.description=@operation
+		 and e.latype=@value
+		 and result is null
+		 and d.deptid='Assembly'
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		  order by serialNo
+	end
+	else if(@reportType='趋势图(日报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from ( 
+		 select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(10),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59'  and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(10),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and result is null and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+	else if(@reportType='趋势图(周报)')
+	begin
+		 select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from ( 
+		 select a.serialNo,a.operation,max(b.description) as opetype,
+		 convert(nvarchar(4),min(a.OperDate),120)+'/'+cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime 
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59'  and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,
+		convert(nvarchar(4),min(a.OperDate),120)+'/'+cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime 
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and result is null and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+	else if(@reportType='趋势图(月报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from ( 
+		 select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59'  and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod(nolock) c
+		 where  a.workNo=c.workno and  a.operation=b.operation 
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and result is null and c.latype=@value and b.deptid='Assembly' and b.type='check'
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+end
+
+else if(@valueType='按产品类型查询')
+begin
+	if(@reportType='汇总报表')
+	begin
+		 select distinct aa.*,bb.Repairname from
+		(
+		select distinct c.workNo,a.serialNo,c.illReason,d.defectname,c.illDate,c.repairResult,c.repairDate,c.repairRemark
+		from Ass_serialcheck (nolock)a,operation (nolock)b,Ass_Repair (nolock)c,DefectCode (nolock)d,Assembly_Prod (nolock)e,model (nolock)f 
+		where 
+		a.workNo=e.workno
+		and e.productcode=f.productCode 
+		and a.operation=b.operation 
+		and a.serialNo=c.serialNo
+		and a.operation=c.type
+		and c.illReason=d.defectcode
+		and a.OperDate >= @startTime+' 00:00:00' 
+		 and a.OperDate <= @endTime+' 23:59:59' 
+		 and b.description=@operation
+		 and f.productType=@value
+		 and result is null
+		 and d.deptid='Assembly'
+		 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='Assembly'
+		  order by serialNo
+	end
+	else if(@reportType='趋势图(日报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(10),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c,model (nolock)d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(10),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c,model(nolock) d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		  and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and result is null and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+	else if(@reportType='趋势图(周报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(4),min(a.OperDate),120)+'/'+cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime
+		 from Ass_serialcheck(nolock) a,operation (nolock)b,Assembly_Prod (nolock)c,model (nolock)d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(4),min(a.OperDate),120)+'/'+cast(DATEPART(WK,min(a.OperDate)) As varchar) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod (nolock)c,model(nolock)d
+		 where a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		  and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and result is null and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+	else if(@reportType='趋势图(月报)')
+	begin
+		select allinfo.tetime as stime,allinfo.opetype as soperation,allinfo.allqty as sallqty,isnull(info.qty,0) as sqty,
+		(allinfo.allqty-isnull(info.qty,0))*100.0/case when allinfo.allqty=0 then 1 else allinfo.allqty end as srate from
+		(
+		select tetime,opetype,COUNT(serialNo) as allqty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation(nolock) b,Assembly_Prod (nolock)c,model (nolock)d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		 and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) allinfo left join
+		 (
+		select tetime,opetype,COUNT(serialNo) as qty from (
+		select a.serialNo,a.operation,max(b.description) as opetype,convert(nvarchar(7),min(a.OperDate),120) as tetime
+		 from Ass_serialcheck (nolock)a,operation (nolock)b,Assembly_Prod(nolock) c,model(nolock) d
+		 where  a.workNo=c.workno and c.productcode=d.productCode and a.operation=b.operation
+		  and  a.OperDate >= @startTime+' 00:00:00' and a.OperDate <= @endTime+' 23:59:59' and d.productType=@value and result is null and b.deptid='Assembly' and b.type='check' 
+		 group by a.serialNo,a.operation) a
+		 group by  tetime,opetype
+		 ) info
+		 on allinfo.tetime=info.tetime and allinfo.opetype=info.opetype
+		 order by stime
+	end
+end
+
+
+
+else if(@valueType='按OEM工单查询')
+begin
+	if(@reportType='汇总报表')
+	begin
+	 
+	    if(@operation<>'总直通率')
+			select * from
+			(
+			 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+			 aa.repairRemark,bb.Repairname,aa.prodes 
+			 from
+				(
+				select distinct c.workNo,c.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+				c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes
+				from OEM_Repair (nolock)c,DefectCode (nolock)d,OEM_Prod (nolock)e 
+				where c.workNo=e.workno
+				 and c.illReason=d.defectcode
+				 and c.illDate>= @startTime+' 00:00:00' 
+				 and c.illDate<= @endTime+' 23:59:59' 
+				 and c.type=case @operation when '总直通率' then c.type else @operation end
+				 and c.workNo=case @value when '总直通率' then c.workNo else @value end
+				 and d.deptid='SMT'
+				 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='SMT'
+			  ) t
+			union
+			select * from
+			(
+			 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+			 aa.repairRemark,bb.Repairname,aa.prodes 
+			 from
+				(
+				select distinct c.workNo,c.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+				c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes
+				from SMT_Repair (nolock)c,DefectCode (nolock)d,OEM_Prod (nolock)e 
+				where c.workNo=e.workno
+				 and c.illReason=d.defectcode
+				 and c.illDate>= @startTime+' 00:00:00' 
+				 and c.illDate<= @endTime+' 23:59:59' 
+				 and c.type=case @operation when '总直通率' then c.type else @operation end
+				 and c.workNo=case @value when '总直通率' then c.workNo else @value end
+				 and d.deptid='SMT'
+				 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='SMT'
+			  ) t    
+	   else
+	       select * from
+			(
+			 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+			 aa.repairRemark,bb.Repairname,aa.prodes 
+			 from
+				(
+				select distinct c.workNo,c.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+				c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes
+				from OEM_Repair (nolock)c,DefectCode (nolock)d,OEM_Prod (nolock)e 
+				where c.workNo=e.workno
+				 and c.illReason=d.defectcode
+				 and c.illDate>= @startTime+' 00:00:00' 
+				 and c.illDate<= @endTime+' 23:59:59' 
+				 and exists (select short_str from  dbo.F_SQLSERVER_SPLIT(@value,',') s where c.workNo=s.short_str)
+				 and d.deptid='SMT'
+				 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='SMT'
+			  ) t
+		  union
+		    select * from
+			(
+			 select distinct aa.workNo,aa.serialNo,aa.illReason,aa.defectname,aa.illDate,aa.repairResult,aa.repairDate,
+			 aa.repairRemark,bb.Repairname,aa.prodes 
+			 from
+				(
+				select distinct c.workNo,c.serialNo,c.illReason,d.defectname,convert(varchar(20),c.illDate,120) as illDate,
+				c.repairResult,convert(varchar(20),c.repairDate,120) as repairDate,c.repairRemark,e.prodes
+				from SMT_Repair (nolock)c,DefectCode (nolock)d,OEM_Prod (nolock)e 
+				where c.workNo=e.workno
+				 and c.illReason=d.defectcode
+				 and c.illDate>= @startTime+' 00:00:00' 
+				 and c.illDate<= @endTime+' 23:59:59' 
+				 and exists (select short_str from  dbo.F_SQLSERVER_SPLIT(@value,',') s where c.workNo=s.short_str)
+				 and d.deptid='SMT'
+				 ) aa left join RepairDispose bb on aa.repairResult=bb.Repaircode and bb.deptid='SMT'
+			  ) t
+		    
+	end
+end 
